@@ -1,0 +1,10 @@
+/src/
+/tools/
+/logs/
+/dist/
+/build-state.json
+/BUILD-INFO.txt
+node_modules/
+.env*
+*.zip
+*.7z

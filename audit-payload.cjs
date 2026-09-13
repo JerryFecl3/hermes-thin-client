@@ -1,0 +1,20 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const req=require('node:module').createRequire(path.join(__dirname,'src/apps/desktop/package.json'));
+const asar=req('@electron/asar');
+const root=path.resolve(process.argv[2]||path.join(__dirname,'src/apps/desktop/release/win-unpacked'));
+const entries=asar.listPackage(path.join(root,'resources/app.asar'));
+const forbidden=/(^|[\\/])(\.git|\.venv|venv|hermes-agent|PortableGit|python(?:w|\d+(?:\.\d+)*)?(?:\.exe|\.dll)?|uv(?:\.exe)?|git\.exe|node\.exe|npm(?:\.cmd)?|ffmpeg\.exe|rg\.exe|playwright)([\\/]|$)/i;
+assert.equal(entries.filter(name=>forbidden.test(name)).length,0,'Forbidden payload in ASAR');
+const roots=[...new Set(entries.map(name=>name.split(/[\\/]/).filter(Boolean)[0]))];
+assert.ok(roots.every(name=>['dist','assets','public','package.json'].includes(name)),'Unexpected ASAR root');
+const deps=[...new Set(entries.filter(name=>/[\\/]node_modules[\\/]/.test(name)).map(name=>name.split(/[\\/]node_modules[\\/]/)[1].split(/[\\/]/)[0]))];
+assert.ok(deps.every(name=>['node-pty','get-windows'].includes(name)),'Unexpected staged dependency');
+const exe=fs.openSync(path.join(root,'Hermes.exe'),'r');
+const head=Buffer.alloc(4096);fs.readSync(exe,head,0,4096,0);fs.closeSync(exe);
+assert.equal(head.toString('ascii',0,2),'MZ');
+assert.equal(head.readUInt16LE(head.readUInt32LE(0x3c)+4),0x8664,'EXE is not Windows x64');
+function list(dir){return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>{const p=path.join(dir,e.name);assert.ok(!e.isSymbolicLink(),'Unexpected payload link');return e.isDirectory()?list(p):[p];});}
+const files=list(root);
+assert.ok(!files.some(name=>forbidden.test(path.relative(root,name))),'Forbidden loose runtime');
+const report={root,exeArchitecture:'x64',asarEntries:entries.length,asarRoots:roots,stagedDependencies:deps,nativeBindings:entries.filter(name=>name.endsWith('.node')),files:files.length,totalBytes:files.reduce((n,f)=>n+fs.statSync(f).size,0),forbiddenFiles:[]};
+console.log(JSON.stringify(report,null,2));

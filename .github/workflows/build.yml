@@ -1,0 +1,142 @@
+name: Build Windows Thin Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream stable tag; blank selects latest official release'
+        type: string
+        required: false
+  schedule:
+    - cron: '23 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thin-client-release
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      needed: ${{ steps.release.outputs.needed }}
+    steps:
+      - name: Select stable upstream release and skip published versions
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:REQUESTED_VERSION
+          if (-not $version) {
+            $raw = gh api repos/NousResearch/hermes-agent/releases/latest
+          } else {
+            if ($version -notmatch '^v[0-9]+(?:\.[0-9]+){1,3}$') { throw 'A stable numeric release tag is required.' }
+            $raw = gh api "repos/NousResearch/hermes-agent/releases/tags/$version"
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve official upstream release.' }
+          $release = $raw | ConvertFrom-Json
+          if ($release.draft -or $release.prerelease) { throw 'Drafts and prereleases are not supported.' }
+          $version = $release.tag_name
+          if ($version -notmatch '^v[0-9]+(?:\.[0-9]+){1,3}$') { throw 'Unexpected upstream tag format.' }
+          $headers = @{Authorization="Bearer $env:GH_TOKEN"; 'User-Agent'='HermesThinClient'}
+          $needed = 'true'
+          try {
+            $existing = Invoke-RestMethod "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$version" -Headers $headers
+            if ($existing.draft) { throw 'An unfinished draft exists. Review it before retrying.' }
+            $needed = 'false'
+          } catch {
+            if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "needed=$needed" >> $env:GITHUB_OUTPUT
+          "Selected upstream: $version; build needed: $needed" >> $env:GITHUB_STEP_SUMMARY
+
+  build:
+    needs: select
+    if: needs.select.outputs.needed == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+      - name: Build upstream Desktop
+        shell: pwsh
+        env:
+          UPSTREAM_VERSION: ${{ needs.select.outputs.version }}
+        run: ./build.ps1 -Version $env:UPSTREAM_VERSION
+      - name: Audit and package
+        shell: pwsh
+        run: ./package.ps1
+      - name: Test packaged EXE with isolated mock Remote Gateway
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem dist/*-win-x64.zip)
+          if ($zips.Count -ne 1) { throw 'Expected one client ZIP.' }
+          $zip = $zips[0]
+          $testRoot = Join-Path $env:RUNNER_TEMP 'hermes-thin-smoke'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $testRoot
+          node.exe ./verify.cjs (Join-Path $testRoot 'Hermes.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Remote Gateway smoke test failed.' }
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: windows-thin-client
+          path: |
+            dist/*-win-x64.zip
+            dist/*.sha256
+            BUILD-INFO.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [select, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: windows-thin-client
+          path: release-files
+      - name: Publish verified release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.select.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $zip = @(Get-ChildItem release-files -Recurse -Filter '*-win-x64.zip')
+          $sha = @(Get-ChildItem release-files -Recurse -Filter '*.sha256')
+          $info = @(Get-ChildItem release-files -Recurse -Filter 'BUILD-INFO.txt')
+          if ($zip.Count -ne 1 -or $sha.Count -ne 1 -or $info.Count -ne 1) { throw 'Unexpected release assets.' }
+          $expected = ((Get-Content $sha[0].FullName -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $zip[0].FullName -Algorithm SHA256).Hash -ne $expected) { throw 'SHA256 mismatch.' }
+          $notes = @(
+            'Unofficial Windows x64 Remote Gateway client built from unmodified NousResearch/hermes-agent.',
+            '',
+            'Extract the complete ZIP and run Start-Hermes.cmd. No local Hermes Agent runtime is included.',
+            'Configuration stays in %APPDATA%\HermesThin. Updates use whole-package replacement.',
+            'Built and audited on GitHub Windows runner; isolated mock Remote Gateway test passed.',
+            'Real gateway credentials are never used in CI. First-run login taking over 45 seconds may require one restart (upstream issue).',
+            '',
+            (Get-Content $info[0].FullName -Raw)
+          ) -join "`n"
+          $notes | Set-Content release-notes.md
+          gh release create $version $zip[0].FullName $sha[0].FullName $info[0].FullName --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Hermes Thin Client $version (Windows x64)" --notes-file release-notes.md --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Draft creation/upload failed; review the draft before retrying.' }
+          gh release edit $version --repo $env:GITHUB_REPOSITORY --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing failed; assets remain in draft.' }
