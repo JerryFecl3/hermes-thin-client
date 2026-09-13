@@ -54,7 +54,13 @@ try {
         $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
         $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
         Run 'npm.cmd' @('ci','--workspace','apps/desktop','--workspace','apps/shared','--include-workspace-root','--no-audit','--no-fund')
-        Run 'npm.cmd' @('run','pack','--workspace','apps/desktop')
+        # The workflow repository is not the upstream checkout. Let upstream
+        # inspect its own Git tree instead of stamping the workflow's GITHUB_SHA.
+        $workflowSha = $env:GITHUB_SHA
+        try {
+            $env:GITHUB_SHA = $null
+            Run 'npm.cmd' @('run','pack','--workspace','apps/desktop')
+        } finally { $env:GITHUB_SHA = $workflowSha }
         $out = Join-Path $src 'apps/desktop/release/win-unpacked'
         foreach ($file in @('Hermes.exe','resources/app.asar','resources/app.asar.unpacked/dist/electron-main.mjs')) {
             if (-not (Test-Path (Join-Path $out $file))) { throw "Missing output: $file" }
