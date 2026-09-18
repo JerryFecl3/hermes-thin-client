@@ -26,8 +26,10 @@ if (Test-Path $zip) { throw "Artifact exists: $zip. Rename/archive it before rep
 $info = @"
 Upstream:
 NousResearch/hermes-agent
-Upstream tag:
+Build version:
 $($state.tag)
+Upstream ref:
+$($state.sourceRef)
 Commit:
 $($state.commit)
 Build date:

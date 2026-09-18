@@ -14,7 +14,10 @@
 ## 自动构建
 
 - Actions → **Build Windows Thin Client** → **Run workflow**：Version 留空构建最新正式 release，也可填写正式 tag。
-- 每天 UTC 03:23 检查一次上游正式 release；已有同名 Release 时跳过构建。
+- 每天 UTC 03:23（北京时间 11:23）检查一次上游正式 release；已有同名 Release 时跳过构建。
+- **Build Windows Thin Client Nightly** 每天 UTC 16:00（北京时间次日 00:00）构建上游 `NousResearch/hermes-agent` 的 `main/HEAD`，也可手动 Run workflow。
+- Nightly 在任务开始时固定完整提交 SHA，版本及 ZIP 名包含 `nightly-YYYYMMDD-<12位SHA>`（日期为北京时间），以预发布形式保存在 Releases，不替代正式版 Latest。即使上游没有新提交，次日仍会构建；同一天、同一提交已经发布时跳过。
+- Nightly 与正式版执行相同的构建、包审计、模拟网关测试和 SHA256 校验。Nightly 属于开发快照，可能包含尚未正式发布的变更。
 - 使用标准 Windows 2022 runner 和固定 Node 22.23.2。Node/npm 会按上游 engines 校验。
 - sparse checkout 只展开 `apps/desktop`、`apps/shared` 和根目录文件；保留 Git 元数据用于 stamp。
 - 构建、包审计和真实 Electron 模拟网关测试全部通过后，发布 ZIP、SHA256 和 BUILD-INFO。
@@ -30,6 +33,10 @@ Windows x64、Git、符合上游要求的 Node/npm 和网络连接：
 
 ```powershell
 .\build.ps1 -Version v2026.9.11
+.\package.ps1
+
+# 构建上游 main 当前 HEAD（自动固定 SHA 并生成 nightly 版本号）
+.\build.ps1 -Version main
 .\package.ps1
 ```
 
