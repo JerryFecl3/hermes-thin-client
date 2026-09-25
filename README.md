@@ -56,3 +56,4 @@ CI 对 ZIP 中的 Windows EXE 进行隔离首次启动、模拟 HTTP/WebSocket �
 本项目不是 Nous Research 官方发行版。上游许可证随客户端以 `LICENSE.hermes.txt` 分发；Electron 自带许可证文件保留。构建脚本不会携带任何真实连接地址、用户数据或凭据。
 
 Release 列表标题使用简短格式：正式版为 Agent 版本（如 `v0.21.5`），每日版为北京时间日期（如 `nightly-260923`）。底层 Release tag 保留原有格式。
+`build.ps1` 会在已知的引导页面引用 `lucide-react`、但 Desktop 未声明依赖时，按上游锁文件的精确版本补装。补装不保存到源码或锁文件，不执行安装脚本，并记录在 BUILD-INFO 中；上游补齐声明后自动跳过。

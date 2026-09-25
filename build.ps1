@@ -72,6 +72,12 @@ try {
         $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
         $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
         Run 'npm.cmd' @('ci','--workspace','apps/desktop','--workspace','apps/shared','--include-workspace-root','--no-audit','--no-fund')
+        $compatVersion = & node.exe (Join-Path $root 'dependency-compat.cjs') $src
+        if ($LASTEXITCODE -ne 0) { throw 'Dependency compatibility check failed.' }
+        if ($compatVersion) {
+            Write-Host "Compatibility: installing undeclared lucide-react@$compatVersion from upstream lockfile version."
+            Run 'npm.cmd' @('install',"lucide-react@$compatVersion",'--no-save','--package-lock=false','--ignore-scripts','--workspace','apps/desktop','--workspace','apps/shared','--include-workspace-root','--no-audit','--no-fund')
+        }
         # The workflow repository is not the upstream checkout. Let upstream
         # inspect its own Git tree instead of stamping the workflow's GITHUB_SHA.
         $workflowSha = $env:GITHUB_SHA
@@ -89,6 +95,7 @@ try {
             node = (& node.exe --version).Trim(); npm = (& npm.cmd --version).Trim()
             electron = $desktop.build.electronVersion; electronBuilder = $desktop.devDependencies.'electron-builder'
             desktopVersion = $desktop.version; unpackedPath = $out
+            dependencyCompatibility = $(if ($compatVersion) { "lucide-react@$compatVersion (undeclared Desktop import)" } else { 'None' })
         }
         $metadata | ConvertTo-Json | Set-Content (Join-Path $root 'build-state.json') -Encoding UTF8
         Write-Host "Build complete: $out"
