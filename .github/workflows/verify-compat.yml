@@ -1,5 +1,8 @@
 name: Verify Desktop dependency compatibility
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/desktop-lucide-compat]
 permissions:
   contents: read
 jobs:
