@@ -1,0 +1,45 @@
+name: Verify Desktop dependency compatibility
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+      - name: Build upstream Desktop
+        shell: pwsh
+        env:
+          UPSTREAM_COMMIT: e8acdc5fc899d7e9220dd6ac0dfeedebb4a42a9a
+          NIGHTLY_DATE: 20260925
+        run: ./build.ps1 -Version main -UpstreamCommit $env:UPSTREAM_COMMIT -NightlyDate $env:NIGHTLY_DATE
+      - name: Audit and package
+        shell: pwsh
+        run: ./package.ps1
+      - name: Test packaged EXE with isolated mock Remote Gateway
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem dist/*-win-x64.zip)
+          if ($zips.Count -ne 1) { throw 'Expected one client ZIP.' }
+          $zip = $zips[0]
+          $testRoot = Join-Path $env:RUNNER_TEMP 'hermes-thin-smoke'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $testRoot
+          node.exe ./verify.cjs (Join-Path $testRoot 'Hermes.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Remote Gateway smoke test failed.' }
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: windows-thin-client
+          path: |
+            dist/*-win-x64.zip
+            dist/*.sha256
+            BUILD-INFO.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
