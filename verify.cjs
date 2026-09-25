@@ -50,6 +50,8 @@ function noRuntime() {
 async function launch() {
   app = await _electron.launch({executablePath:exe,env,timeout:30000});
   const page = await app.firstWindow();
+  await page.waitForURL(url => url.protocol === 'file:' && url.pathname.endsWith('/index.html'), {timeout:30000});
+  await page.waitForLoadState('load');
   await page.waitForFunction(() => Boolean(window.hermesDesktop),null,{timeout:30000});
   return page;
 }
@@ -87,10 +89,12 @@ async function close() { if(app) { await app.close(); app=null; } }
   report.versions = versions;
   report.paths = await app.evaluate(({app})=>({userData:app.getPath('userData'),exe:app.getPath('exe')}));
   await page.evaluate(()=>localStorage.setItem('thin-client-upgrade-test','preserved'));
+  console.log('Persistence checkpoint:', JSON.stringify(await page.evaluate(()=>({url:location.href,marker:localStorage.getItem('thin-client-upgrade-test')}))));
   noRuntime();
   await close();
   page = await launch();
   const restored = await page.evaluate(()=>window.hermesDesktop.getConnection());
+  console.log('Persistence restart:', JSON.stringify(await page.evaluate(()=>({url:location.href,marker:localStorage.getItem('thin-client-upgrade-test')}))));
   assert.equal(restored.mode,'remote'); assert.equal(restored.baseUrl,url);
   assert.equal(await page.evaluate(()=>localStorage.getItem('thin-client-upgrade-test')),'preserved');
   const savedBoot = await page.evaluate(()=>window.hermesDesktop.getBootstrapState());
