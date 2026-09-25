@@ -20,7 +20,16 @@ $bad = @($files | Where-Object {
 if ($bad.Count) { throw "Forbidden runtime payload: $($bad.FullName -join ', ')" }
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
-$name = "Hermes-ThinClient-$($state.tag)-win-x64.zip"
+$packageVersion = $state.tag
+if ($state.sourceRef -ne 'main') {
+    # Read from the exact built commit without expanding the sparse checkout or running Python.
+    $versionSource = & git.exe -C (Join-Path $root 'src') show "$($state.commit):hermes_cli/__init__.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot read upstream Agent version from the built commit.' }
+    $versionMatch = [regex]::Match(($versionSource -join "`n"), '(?m)^__version__\s*=\s*["'']([0-9]+\.[0-9]+\.[0-9]+)["'']\s*$')
+    if (-not $versionMatch.Success) { throw 'Expected a stable semantic Agent version in hermes_cli/__init__.py.' }
+    $packageVersion = "v$($versionMatch.Groups[1].Value)"
+}
+$name = "Hermes-ThinClient-$packageVersion-win-x64.zip"
 $zip = Join-Path $dist $name
 if (Test-Path $zip) { throw "Artifact exists: $zip. Rename/archive it before repackaging." }
 $info = @"
@@ -28,6 +37,8 @@ Upstream:
 NousResearch/hermes-agent
 Build version:
 $($state.tag)
+Package version:
+$packageVersion
 Upstream ref:
 $($state.sourceRef)
 Commit:

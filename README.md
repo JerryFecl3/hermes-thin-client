@@ -4,7 +4,7 @@
 
 ## 下载和使用
 
-在本仓库 Releases 下载 `Hermes-ThinClient-<tag>-win-x64.zip` 和 `.sha256`。
+在本仓库 Releases 下载 ZIP 和对应的 `.sha256`。正式版包名使用该 tag 源码声明的 Hermes Agent 版本，例如 `Hermes-ThinClient-v0.21.5-win-x64.zip`；Nightly 包名使用 `Hermes-ThinClient-nightly-YYYYMMDD-<12位SHA>-win-x64.zip`。Release tag 和 BUILD-INFO 仍记录原始上游 tag，方便追溯。已发布的历史附件不自动重命名。
 完整解压到任意可写目录，运行 **Start-Hermes.cmd**，选择 **Connect to existing Hermes / Remote Gateway**，填写你自己的网关地址并在界面中认证。
 
 客户端不包含 Hermes Agent、Python/venv/uv、Git、独立 Node/npm、ffmpeg.exe 或 Playwright 浏览器。Electron 内嵌 Chromium、V8、Node，以及必要的 ffmpeg.dll；官方 staged native dependencies 保留 node-pty 和 get-windows。上游 Local 模式 UI 仍然存在，本项目不对其进行功能删改；请使用 Remote Gateway。
