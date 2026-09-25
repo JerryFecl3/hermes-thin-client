@@ -63,6 +63,8 @@ Desktop package version:
 $($state.desktopVersion)
 Upstream source modifications:
 None
+Build dependency compatibility:
+$($state.dependencyCompatibility)
 Build command:
 npm run pack --workspace apps/desktop
 Sparse checkout:
