@@ -118,6 +118,9 @@ jobs:
           if ($zip.Count -ne 1 -or $sha.Count -ne 1 -or $info.Count -ne 1) { throw 'Unexpected release assets.' }
           $expected = ((Get-Content $sha[0].FullName -Raw).Trim() -split '\s+')[0]
           if ((Get-FileHash $zip[0].FullName -Algorithm SHA256).Hash -ne $expected) { throw 'SHA256 mismatch.' }
+          $titleMatch = [regex]::Match($version, '^nightly-[0-9]{2}([0-9]{6})-[0-9a-f]{12}$')
+          if (-not $titleMatch.Success) { throw 'Unexpected nightly version format.' }
+          $releaseTitle = "nightly-$($titleMatch.Groups[1].Value)"
           $notes = @(
             'Unofficial Windows x64 Remote Gateway client built from unmodified NousResearch/hermes-agent.',
             'Nightly snapshot of upstream main; experimental and not an official stable release.',
@@ -130,7 +133,7 @@ jobs:
             (Get-Content $info[0].FullName -Raw)
           ) -join "`n"
           $notes | Set-Content release-notes.md
-          gh release create $version $zip[0].FullName $sha[0].FullName $info[0].FullName --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Hermes Thin Client $version (Windows x64)" --notes-file release-notes.md --prerelease --latest=false --draft
+          gh release create $version $zip[0].FullName $sha[0].FullName $info[0].FullName --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $releaseTitle --notes-file release-notes.md --prerelease --latest=false --draft
           if ($LASTEXITCODE -ne 0) { throw 'Draft creation/upload failed; review the draft before retrying.' }
           gh release edit $version --repo $env:GITHUB_REPOSITORY --draft=false --prerelease --latest=false
           if ($LASTEXITCODE -ne 0) { throw 'Publishing failed; assets remain in draft.' }

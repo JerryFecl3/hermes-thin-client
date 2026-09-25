@@ -54,3 +54,5 @@ CI 对 ZIP 中的 Windows EXE 进行隔离首次启动、模拟 HTTP/WebSocket �
 自行构建 EXE 没有 Nous 的签名，可能显示 Unknown Publisher。请核对下载来源和 SHA256。
 
 本项目不是 Nous Research 官方发行版。上游许可证随客户端以 `LICENSE.hermes.txt` 分发；Electron 自带许可证文件保留。构建脚本不会携带任何真实连接地址、用户数据或凭据。
+
+Release 列表标题使用简短格式：正式版为 Agent 版本（如 `v0.21.5`），每日版为北京时间日期（如 `nightly-260923`）。底层 Release tag 保留原有格式。
