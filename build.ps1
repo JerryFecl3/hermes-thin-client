@@ -76,7 +76,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Dependency compatibility check failed.' }
         if ($compatVersion) {
             Write-Host "Compatibility: installing undeclared lucide-react@$compatVersion from upstream lockfile version."
-            Run 'npm.cmd' @('install',"lucide-react@$compatVersion",'--no-save','--package-lock=false','--ignore-scripts','--workspace','apps/desktop','--workspace','apps/shared','--include-workspace-root','--no-audit','--no-fund')
+            $compatRoot = Join-Path $root "tools/dependency-compat/$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Force $compatRoot | Out-Null
+            '{}' | Set-Content (Join-Path $compatRoot 'package.json') -Encoding UTF8
+            Run 'npm.cmd' @('install',"lucide-react@$compatVersion",'--prefix',$compatRoot,'--no-save','--package-lock=false','--ignore-scripts','--legacy-peer-deps','--no-audit','--no-fund')
+            $compatPackage = Join-Path $compatRoot 'node_modules/lucide-react'
+            $compatManifest = Get-Content (Join-Path $compatPackage 'package.json') -Raw | ConvertFrom-Json -AsHashtable
+            if ($compatManifest.version -ne $compatVersion -or ($compatManifest.ContainsKey('dependencies') -and $compatManifest.dependencies.Count -gt 0)) { throw 'Unexpected lucide-react package contract.' }
+            $compatTarget = Join-Path $src 'node_modules/lucide-react'
+            if (Test-Path $compatTarget) { throw 'Unexpected pre-existing lucide-react installation.' }
+            Copy-Item -LiteralPath $compatPackage -Destination $compatTarget -Recurse
         }
         # The workflow repository is not the upstream checkout. Let upstream
         # inspect its own Git tree instead of stamping the workflow's GITHUB_SHA.
