@@ -102,7 +102,7 @@ try {
             upstream = 'NousResearch/hermes-agent'; tag = $artifactVersion; sourceRef = $Version
             commit = (& git.exe rev-parse HEAD).Trim(); builtAt = [DateTime]::UtcNow.ToString('o')
             node = (& node.exe --version).Trim(); npm = (& npm.cmd --version).Trim()
-            electron = $desktop.build.electronVersion; electronBuilder = $desktop.devDependencies.'electron-builder'
+            electron = $desktop.devDependencies.electron; electronBuilder = $desktop.devDependencies.'electron-builder'
             desktopVersion = $desktop.version; unpackedPath = $out
             dependencyCompatibility = $(if ($compatVersion) { "lucide-react@$compatVersion (undeclared Desktop import)" } else { 'None' })
         }
