@@ -7,7 +7,10 @@ const forbidden=/(^|[\\/])(\.git|\.venv|venv|hermes-agent|PortableGit|python(?:w
 assert.equal(entries.filter(name=>forbidden.test(name)).length,0,'Forbidden payload in ASAR');
 const roots=[...new Set(entries.map(name=>name.split(/[\\/]/).filter(Boolean)[0]))];
 assert.ok(roots.every(name=>['dist','assets','public','package.json'].includes(name)),'Unexpected ASAR root');
-const deps=[...new Set(entries.filter(name=>/[\\/]node_modules[\\/]/.test(name)).map(name=>name.split(/[\\/]node_modules[\\/]/)[1].split(/[\\/]/)[0]))];
+const staged=entries.filter(name=>/[\\/]node_modules[\\/]/.test(name));
+const markers=staged.filter(name=>/[\\/]node_modules[\\/]\.hermes-product(?:[\\/]|$)/.test(name));
+assert.ok(markers.length<=1 && markers.every(name=>/[\\/]node_modules[\\/]\.hermes-product$/.test(name)),'Unexpected staged marker');
+const deps=[...new Set(staged.filter(name=>!markers.includes(name)).map(name=>name.split(/[\\/]node_modules[\\/]/)[1].split(/[\\/]/)[0]))];
 assert.ok(deps.every(name=>['node-pty','get-windows'].includes(name)),`Unexpected staged dependency: ${deps.join(', ')}`);
 const exe=fs.openSync(path.join(root,'Hermes.exe'),'r');
 const head=Buffer.alloc(4096);fs.readSync(exe,head,0,4096,0);fs.closeSync(exe);
