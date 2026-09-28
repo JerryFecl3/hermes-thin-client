@@ -100,6 +100,13 @@ try {
             $env:HERMES_BUILD_COMMIT = $previousBuildCommit
         }
         $out = Join-Path $src 'apps/desktop/release/win-unpacked'
+        $clientExe = Join-Path $out 'Hermes.exe'
+        if (-not (Test-Path $clientExe)) {
+            $builtExes = @(Get-ChildItem -LiteralPath $out -File -Filter '*.exe')
+            if ($builtExes.Count -ne 1) { throw 'Expected one packaged client EXE to name Hermes.exe.' }
+            Rename-Item -LiteralPath $builtExes[0].FullName -NewName 'Hermes.exe'
+            Write-Host "Client executable: $($builtExes[0].Name) -> Hermes.exe"
+        }
         foreach ($file in @('Hermes.exe','resources/app.asar','resources/app.asar.unpacked/dist/electron-main.mjs')) {
             if (-not (Test-Path (Join-Path $out $file))) { throw "Missing output: $file" }
         }
