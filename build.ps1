@@ -87,13 +87,18 @@ try {
             if (Test-Path $compatTarget) { throw 'Unexpected pre-existing lucide-react installation.' }
             Copy-Item -LiteralPath $compatPackage -Destination $compatTarget -Recurse
         }
-        # The workflow repository is not the upstream checkout. Let upstream
-        # inspect its own Git tree instead of stamping the workflow's GITHUB_SHA.
+        # Mark this externally distributed package as a pinned upstream commit
+        # build, so the packaged app does not offer source checkout updates.
         $workflowSha = $env:GITHUB_SHA
+        $previousBuildCommit = $env:HERMES_BUILD_COMMIT
         try {
             $env:GITHUB_SHA = $null
+            $env:HERMES_BUILD_COMMIT = $resolvedCommit
             Run 'npm.cmd' @('run','pack','--workspace','apps/desktop')
-        } finally { $env:GITHUB_SHA = $workflowSha }
+        } finally {
+            $env:GITHUB_SHA = $workflowSha
+            $env:HERMES_BUILD_COMMIT = $previousBuildCommit
+        }
         $out = Join-Path $src 'apps/desktop/release/win-unpacked'
         foreach ($file in @('Hermes.exe','resources/app.asar','resources/app.asar.unpacked/dist/electron-main.mjs')) {
             if (-not (Test-Path (Join-Path $out $file))) { throw "Missing output: $file" }

@@ -102,7 +102,8 @@ async function close() { if(app) { await app.close(); app=null; } }
   report.restarted = {mode:restored.mode,bootstrap:savedBoot,uiSettingPreserved:true};
   report.updater = await page.evaluate(()=>window.hermesDesktop.updates.check());
   assert.equal(report.updater.supported,false);
-  assert.equal(report.updater.reason,'not-a-git-checkout');
+  assert.equal(report.updater.mechanism,'external');
+  assert.equal(report.updater.reason,'commit-build');
   noRuntime();
   assert.ok(report.wsConnections>=2,'Real WebSocket handshake missing');
   report.ok = true;
