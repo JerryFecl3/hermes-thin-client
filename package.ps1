@@ -68,7 +68,7 @@ $($state.dependencyCompatibility)
 Build command:
 npm run pack --workspace apps/desktop
 Sparse checkout:
-apps/desktop, apps/shared, scripts/build, root-level files (Git cone mode)
+apps/desktop, apps/shared, scripts/build, pm, root-level files (Git cone mode)
 Notes:
 Electron embeds Chromium, V8 and Node internally; no standalone Node/npm distribution.
 Stock Local mode remains available. Select Connect to existing Hermes / Remote Gateway.

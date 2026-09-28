@@ -52,7 +52,7 @@ try {
     }
     Run 'git.exe' @('-C',$src,'fetch','--filter=blob:none','origin',$fetchRef)
     Run 'git.exe' @('-C',$src,'sparse-checkout','init','--cone')
-    Run 'git.exe' @('-C',$src,'sparse-checkout','set','apps/desktop','apps/shared','scripts/build')
+    Run 'git.exe' @('-C',$src,'sparse-checkout','set','apps/desktop','apps/shared','scripts/build','pm')
     Run 'git.exe' @('-C',$src,'checkout','--detach',$checkoutRef)
     $resolvedCommit = (& git.exe -C $src rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or ($Version -eq 'main' -and $resolvedCommit -ne $UpstreamCommit)) { throw 'Checked-out commit does not match the selected source.' }
