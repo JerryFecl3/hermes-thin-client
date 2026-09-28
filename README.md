@@ -19,7 +19,7 @@
 - Nightly 在任务开始时固定完整提交 SHA，版本及 ZIP 名包含 `nightly-YYYYMMDD-<12位SHA>`（日期为北京时间），以预发布形式保存在 Releases，不替代正式版 Latest。即使上游没有新提交，次日仍会构建；同一天、同一提交已经发布时跳过。
 - Nightly 与正式版执行相同的构建、包审计、模拟网关测试和 SHA256 校验。Nightly 属于开发快照，可能包含尚未正式发布的变更。
 - 使用标准 Windows 2022 runner 和固定 Node 22.23.2。Node/npm 会按上游 engines 校验。
-- sparse checkout 只展开 `apps/desktop`、`apps/shared` 和根目录文件；保留 Git 元数据用于 stamp。
+- sparse checkout 展开 `apps/desktop`、`apps/shared`、上游共用构建脚本 `scripts/build` 和根目录文件；保留 Git 元数据用于 stamp。
 - 构建、包审计和真实 Electron 模拟网关测试全部通过后，发布 ZIP、SHA256 和 BUILD-INFO。
 - 构建 job 只有仓库读取权限；发布 job 单独获得写权限。不需要 PAT 或 Remote Gateway secrets。
 - 自动版本选择不保证未来上游构建兼容；失败时不会发布可见 Release。若发布上传途中失败留下 draft，请检查并删除失败 draft 后重试。
