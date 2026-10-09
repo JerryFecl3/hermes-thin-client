@@ -26,8 +26,14 @@ if ($state.sourceRef -ne 'main') {
     $versionSource = & git.exe -C (Join-Path $root 'src') show "$($state.commit):hermes_cli/__init__.py"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read upstream Agent version from the built commit.' }
     $versionMatch = [regex]::Match(($versionSource -join "`n"), '(?m)^__version__\s*=\s*["'']([0-9]+\.[0-9]+\.[0-9]+)["'']\s*$')
-    if (-not $versionMatch.Success) { throw 'Expected a stable semantic Agent version in hermes_cli/__init__.py.' }
-    $packageVersion = "v$($versionMatch.Groups[1].Value)"
+    if ($versionMatch.Success) {
+        $packageVersion = "v$($versionMatch.Groups[1].Value)"
+    } elseif ($state.sourceRef -match '^v[0-9]+\.[0-9]+\.[0-9]+$' -and ($versionSource -join "`n") -match '(?m)^__version__:\s*str\s*$') {
+        # New releases resolve __version__ lazily from install identity.
+        $packageVersion = $state.sourceRef
+    } else {
+        throw 'Expected a stable semantic Agent version or a semantic release tag with lazy __version__.'
+    }
 }
 $name = "Hermes-ThinClient-$packageVersion-win-x64.zip"
 $zip = Join-Path $dist $name
