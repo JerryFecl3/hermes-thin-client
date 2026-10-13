@@ -4,6 +4,7 @@
 /dist/
 /build-state.json
 /BUILD-INFO.txt
+/.build/
 node_modules/
 .env*
 *.zip

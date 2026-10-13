@@ -1,124 +1,78 @@
 [CmdletBinding()]
-param([string]$Version, [string]$NodeDirectory, [string]$UpstreamCommit, [string]$NightlyDate)
+param([string]$Version, [string]$UpstreamCommit, [string]$NightlyDate)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$root = $PSScriptRoot
-$src = Join-Path $root 'src'
-New-Item -ItemType Directory -Force (Join-Path $root 'logs') | Out-Null
-. (Join-Path $root 'toolchain.ps1') -NodeDirectory $NodeDirectory
-foreach ($command in @('git.exe','node.exe','npm.cmd')) {
-    if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is required on the BUILD machine only." }
-}
+
 function Run([string]$Exe, [string[]]$Arguments) {
     & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Exe failed with exit code $LASTEXITCODE" }
 }
+Run 'node' @('-e', 'if(process.platform!=="win32"||process.arch!=="x64")throw Error("Windows x64 Node is required")')
 if (-not $Version) {
-    $release = Invoke-RestMethod 'https://api.github.com/repos/NousResearch/hermes-agent/releases/latest'
-    if ($release.prerelease -or $release.draft) { throw 'Latest release is not a stable published release.' }
-    $Version = $release.tag_name
+    $Version = (Invoke-RestMethod 'https://api.github.com/repos/NousResearch/hermes-agent/releases/latest').tag_name
 }
+if ($Version -ne 'main' -and $Version -notmatch '^v[0-9]+(?:\.[0-9]+){1,3}$') { throw 'Version must be a stable numeric tag or main.' }
+if ($UpstreamCommit -and $UpstreamCommit -notmatch '^[0-9a-f]{40}$') { throw 'UpstreamCommit must be a full commit SHA.' }
+if ($Version -ne 'main' -and $NightlyDate) { throw 'NightlyDate is only valid for main.' }
+
+# A fresh, complete checkout avoids stale build products and sparse-checkout dependencies.
+$src = Join-Path $PSScriptRoot ".build/$([guid]::NewGuid().ToString('N'))"
+Run 'git' @('init', $src)
+Run 'git' @('-C', $src, 'remote', 'add', 'origin', 'https://github.com/NousResearch/hermes-agent.git')
+$ref = if ($Version -eq 'main') { 'refs/heads/main' } else { "refs/tags/$Version" }
+$fetchRef = if ($Version -eq 'main' -and $UpstreamCommit) { $UpstreamCommit } else { $ref }
+Run 'git' @('-C', $src, 'fetch', '--depth=1', 'origin', $fetchRef)
+Run 'git' @('-C', $src, 'checkout', '--detach', 'FETCH_HEAD')
+$commit = (& git -C $src rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or ($UpstreamCommit -and $commit -ne $UpstreamCommit)) { throw 'Checkout does not match the selected commit.' }
 if ($Version -eq 'main') {
-    if (-not $UpstreamCommit) {
-        $head = & git.exe ls-remote https://github.com/NousResearch/hermes-agent.git refs/heads/main
-        if ($LASTEXITCODE -ne 0 -or -not $head) { throw 'Cannot resolve upstream main.' }
-        $UpstreamCommit = ($head -split '\s+')[0]
-    }
-    if ($UpstreamCommit -notmatch '^[0-9a-f]{40}$') { throw 'A full upstream commit SHA is required.' }
     if (-not $NightlyDate) { $NightlyDate = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd') }
     if ($NightlyDate -notmatch '^[0-9]{8}$') { throw 'NightlyDate must use yyyyMMdd.' }
-    $artifactVersion = "nightly-$NightlyDate-$($UpstreamCommit.Substring(0,12))"
-    $fetchRef = $UpstreamCommit
-    $checkoutRef = $UpstreamCommit
-} else {
-    if ($UpstreamCommit -or $NightlyDate) { throw 'UpstreamCommit and NightlyDate are only supported with -Version main.' }
-    if ($Version -notmatch '^v[0-9]+(?:\.[0-9]+){1,3}$') { throw 'Specify a stable numeric release tag or main.' }
-    $artifactVersion = $Version
-    $fetchRef = "refs/tags/${Version}:refs/tags/${Version}"
-    $checkoutRef = "refs/tags/$Version"
+    $label = "nightly-$NightlyDate-$($commit.Substring(0,12))"
+} else { $label = $Version }
+$dist = Join-Path $PSScriptRoot 'dist'
+$zip = Join-Path $dist "Hermes-Light-$label-win-x64.zip"
+if (Test-Path $zip) { throw "Artifact already exists: $zip" }
+
+$savedEnv = @{}
+foreach ($key in @('HERMES_DESKTOP_VARIANT', 'HERMES_BUILD_COMMIT', 'HERMES_PAYLOAD_TAG', 'GITHUB_SHA', 'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD', 'CSC_IDENTITY_AUTO_DISCOVERY')) {
+    $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
-Write-Host "Selected upstream: $Version ($checkoutRef); artifact: $artifactVersion"
-Start-Transcript -Path (Join-Path $root "logs/build-$(Get-Date -Format yyyyMMdd-HHmmss).log") | Out-Null
+Push-Location $src
 try {
-    if (-not (Test-Path $src)) {
-        Run 'git.exe' @('clone','--filter=blob:none','--no-checkout','--single-branch','--branch',$Version,'https://github.com/NousResearch/hermes-agent.git',$src)
-    } else {
-        if (-not (Test-Path (Join-Path $src '.git'))) { throw 'src exists but is not the managed git checkout.' }
-        $origin = & git.exe -C $src remote get-url origin
-        if ($LASTEXITCODE -ne 0 -or $origin -notmatch '^https://github.com/NousResearch/hermes-agent(?:\.git)?$') { throw 'Unexpected upstream origin.' }
-        # Ignore never-checked-out files on a new --no-checkout clone; otherwise refuse tracked edits.
-        $dirty = & git.exe -C $src status --porcelain --untracked-files=no
-        if ($dirty) { throw 'Tracked source files have changes. Preserve/review them before switching releases.' }
-    }
-    Run 'git.exe' @('-C',$src,'fetch','--filter=blob:none','origin',$fetchRef)
-    Run 'git.exe' @('-C',$src,'sparse-checkout','init','--cone')
-    Run 'git.exe' @('-C',$src,'sparse-checkout','set','apps/desktop','apps/shared','scripts/build','pm')
-    Run 'git.exe' @('-C',$src,'checkout','--detach',$checkoutRef)
-    $resolvedCommit = (& git.exe -C $src rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or ($Version -eq 'main' -and $resolvedCommit -ne $UpstreamCommit)) { throw 'Checked-out commit does not match the selected source.' }
-    $desktop = Get-Content (Join-Path $src 'apps/desktop/package.json') -Raw | ConvertFrom-Json
-    if (-not $desktop.scripts.pack -or -not $desktop.scripts.build) { throw 'Upstream Desktop build contract changed. Review the new release before building.' }
-    Push-Location $src
-    try {
-        Run 'node.exe' @('-e','if(process.platform!=="win32"||process.arch!=="x64")throw Error("This build script requires a Windows x64 Node runtime")')
-        # npm bundles semver. Check BOTH upstream manifests before allowing install scripts.
-        $npmRoot = Split-Path (Get-Command npm.cmd).Source
-        $semver = Join-Path $npmRoot 'node_modules/npm/node_modules/semver'
-        if (-not (Test-Path $semver)) { throw 'Cannot find npm semver; supply -NodeDirectory pointing to an official Node Windows distribution.' }
-        $env:HERMES_THIN_SEMVER = $semver
-        $env:HERMES_THIN_NPM_VERSION = (& npm.cmd --version).Trim()
-        Run 'node.exe' @('-e', 'const fs=require("fs"),s=require(process.env.HERMES_THIN_SEMVER);for(const p of ["package.json","apps/desktop/package.json"]){const e=JSON.parse(fs.readFileSync(p)).engines||{};if(e.node&&!s.satisfies(process.version,e.node))throw Error(p+" requires Node "+e.node);if(e.npm&&!s.satisfies(process.env.HERMES_THIN_NPM_VERSION,e.npm))throw Error(p+" requires npm "+e.npm)}console.log("Build Node:",process.version,"npm:",process.env.HERMES_THIN_NPM_VERSION)')
-        $env:npm_config_cache = Join-Path $root 'tools/npm-cache'
-        $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
-        $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
-        Run 'npm.cmd' @('ci','--workspace','apps/desktop','--workspace','apps/shared','--include-workspace-root','--no-audit','--no-fund')
-        $compatVersion = & node.exe (Join-Path $root 'dependency-compat.cjs') $src
-        if ($LASTEXITCODE -ne 0) { throw 'Dependency compatibility check failed.' }
-        if ($compatVersion) {
-            Write-Host "Compatibility: installing undeclared lucide-react@$compatVersion from upstream lockfile version."
-            $compatRoot = Join-Path $root "tools/dependency-compat/$([guid]::NewGuid().ToString('N'))"
-            New-Item -ItemType Directory -Force $compatRoot | Out-Null
-            '{}' | Set-Content (Join-Path $compatRoot 'package.json') -Encoding UTF8
-            Run 'npm.cmd' @('install',"lucide-react@$compatVersion",'--prefix',$compatRoot,'--no-save','--package-lock=false','--ignore-scripts','--legacy-peer-deps','--no-audit','--no-fund')
-            $compatPackage = Join-Path $compatRoot 'node_modules/lucide-react'
-            $compatManifest = Get-Content (Join-Path $compatPackage 'package.json') -Raw | ConvertFrom-Json -AsHashtable
-            if ($compatManifest.version -ne $compatVersion -or ($compatManifest.ContainsKey('dependencies') -and $compatManifest.dependencies.Count -gt 0)) { throw 'Unexpected lucide-react package contract.' }
-            $compatTarget = Join-Path $src 'node_modules/lucide-react'
-            if (Test-Path $compatTarget) { throw 'Unexpected pre-existing lucide-react installation.' }
-            Copy-Item -LiteralPath $compatPackage -Destination $compatTarget -Recurse
-        }
-        # Mark this externally distributed package as a pinned upstream commit
-        # build, so the packaged app does not offer source checkout updates.
-        $workflowSha = $env:GITHUB_SHA
-        $previousBuildCommit = $env:HERMES_BUILD_COMMIT
-        try {
-            $env:GITHUB_SHA = $null
-            $env:HERMES_BUILD_COMMIT = $resolvedCommit
-            Run 'npm.cmd' @('run','pack','--workspace','apps/desktop')
-        } finally {
-            $env:GITHUB_SHA = $workflowSha
-            $env:HERMES_BUILD_COMMIT = $previousBuildCommit
-        }
-        $out = Join-Path $src 'apps/desktop/release/win-unpacked'
-        $clientExe = Join-Path $out 'Hermes.exe'
-        if (-not (Test-Path $clientExe)) {
-            $builtExes = @(Get-ChildItem -LiteralPath $out -File -Filter '*.exe')
-            if ($builtExes.Count -ne 1) { throw 'Expected one packaged client EXE to name Hermes.exe.' }
-            Rename-Item -LiteralPath $builtExes[0].FullName -NewName 'Hermes.exe'
-            Write-Host "Client executable: $($builtExes[0].Name) -> Hermes.exe"
-        }
-        foreach ($file in @('Hermes.exe','resources/app.asar','resources/app.asar.unpacked/dist/electron-main.mjs')) {
-            if (-not (Test-Path (Join-Path $out $file))) { throw "Missing output: $file" }
-        }
-        $metadata = [ordered]@{
-            upstream = 'NousResearch/hermes-agent'; tag = $artifactVersion; sourceRef = $Version
-            commit = (& git.exe rev-parse HEAD).Trim(); builtAt = [DateTime]::UtcNow.ToString('o')
-            node = (& node.exe --version).Trim(); npm = (& npm.cmd --version).Trim()
-            electron = $desktop.devDependencies.electron; electronBuilder = $desktop.devDependencies.'electron-builder'
-            desktopVersion = $desktop.version; unpackedPath = $out
-            dependencyCompatibility = $(if ($compatVersion) { "lucide-react@$compatVersion (undeclared Desktop import)" } else { 'None' })
-        }
-        $metadata | ConvertTo-Json | Set-Content (Join-Path $root 'build-state.json') -Encoding UTF8
-        Write-Host "Build complete: $out"
-    } finally { Pop-Location }
-} finally { Stop-Transcript | Out-Null }
+    $env:HERMES_DESKTOP_VARIANT = 'light'
+    # Let upstream stamp this checkout, rather than this wrapper repository's CI SHA.
+    $env:GITHUB_SHA = $null
+    $env:HERMES_BUILD_COMMIT = $null
+    $env:HERMES_PAYLOAD_TAG = $null
+    $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+    Run 'npm.cmd' @('ci', '--workspace', 'apps/desktop', '--workspace', 'apps/shared', '--include-workspace-root', '--engine-strict', '--no-audit', '--no-fund')
+    Run 'npm.cmd' @('run', 'pack', '--workspace', 'apps/desktop')
+
+    $out = Join-Path $src 'apps/desktop/release/win-unpacked'
+    $stamp = Get-Content (Join-Path $out 'resources/install-stamp.json') -Raw | ConvertFrom-Json
+    if ($stamp.payload -ne 'light' -or $stamp.commit -ne $commit -or $stamp.dirty) { throw 'Expected a clean Light artifact from the selected commit.' }
+    $exes = @(Get-ChildItem -LiteralPath $out -File -Filter '*.exe')
+    if ($exes.Count -ne 1 -or -not (Test-Path (Join-Path $out 'resources/app.asar'))) { throw 'Expected an unpacked Windows Electron application.' }
+    if (Test-Path (Join-Path $out 'resources/agent-payload')) { throw 'Light must not contain a bundled Agent runtime.' }
+
+    New-Item -ItemType Directory -Force $dist | Out-Null
+    $info = [ordered]@{
+        upstream = 'NousResearch/hermes-agent'; ref = $Version; commit = $commit
+        variant = 'light'; target = 'win-x64'; executable = $exes[0].Name
+        builtAt = [DateTime]::UtcNow.ToString('o'); node = (& node --version).Trim()
+        command = 'HERMES_DESKTOP_VARIANT=light npm run pack --workspace apps/desktop'
+    } | ConvertTo-Json
+    $info | Set-Content (Join-Path $out 'BUILD-INFO.json') -Encoding UTF8
+    Copy-Item -LiteralPath (Join-Path $src 'LICENSE') -Destination (Join-Path $out 'LICENSE.hermes.txt')
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory($out, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
+    $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText("$zip.sha256", "$hash  $([IO.Path]::GetFileName($zip))`n")
+    $info | Set-Content (Join-Path $dist 'BUILD-INFO.json') -Encoding UTF8
+    Write-Host "Package: $zip`nSHA256: $hash"
+} finally {
+    Pop-Location
+    foreach ($key in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process') }
+}

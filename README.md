@@ -1,59 +1,53 @@
-# Hermes Windows Thin Client
+# Hermes Light for Windows
 
-非官方 Windows x64 构建工具链，使用 **未修改的 NousResearch/hermes-agent Desktop 源码**生成可解压运行的 Remote Gateway 客户端。
+使用 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 自带的 **Light** 模式，构建 Windows x64 便携客户端。本仓库只负责构建和分发，不修改上游源码；它不是 Nous Research 官方发行版。
 
-## 下载和使用
+## 构建方式
 
-在本仓库 Releases 下载 ZIP 和对应的 `.sha256`。正式版包名使用该 tag 源码声明的 Hermes Agent 版本，例如 `Hermes-ThinClient-v0.21.5-win-x64.zip`；Nightly 包名使用 `Hermes-ThinClient-nightly-YYYYMMDD-<12位SHA>-win-x64.zip`。Release tag 和 BUILD-INFO 仍记录原始上游 tag，方便追溯。已发布的历史附件不自动重命名。
-完整解压到任意可写目录，运行 **Start-Hermes.cmd**，选择 **Connect to existing Hermes / Remote Gateway**，填写你自己的网关地址并在界面中认证。
+核心命令在上游仓库根目录执行：
 
-客户端不包含 Hermes Agent、Python/venv/uv、Git、独立 Node/npm、ffmpeg.exe 或 Playwright 浏览器。Electron 内嵌 Chromium、V8、Node，以及必要的 ffmpeg.dll；官方 staged native dependencies 保留 node-pty 和 get-windows。上游 Local 模式 UI 仍然存在，本项目不对其进行功能删改；请使用 Remote Gateway。
+```powershell
+$env:HERMES_DESKTOP_VARIANT = 'light'
+npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund
+npm run pack --workspace apps/desktop
+```
 
-配置位于 `%APPDATA%\HermesThin`，不在程序目录内。升级时退出客户端（包括托盘），替换程序文件，继续使用启动脚本；不要删除配置目录。内置源码式 updater 不受支持。
+安装和打包规则由上游维护。这里不补装缺失依赖、不裁剪产物、不重命名 EXE，也不调用上游 Electron 内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
 
-## 自动构建
-
-- Actions → **Build Windows Thin Client** → **Run workflow**：Version 留空构建最新正式 release，也可填写正式 tag。
-- 每天 UTC 03:23（北京时间 11:23）检查一次上游正式 release；已有同名 Release 时跳过构建。
-- **Build Windows Thin Client Nightly** 每天 UTC 16:00（北京时间次日 00:00）构建上游 `NousResearch/hermes-agent` 的 `main/HEAD`，也可手动 Run workflow。
-- Nightly 在任务开始时固定完整提交 SHA，版本及 ZIP 名包含 `nightly-YYYYMMDD-<12位SHA>`（日期为北京时间），以预发布形式保存在 Releases，不替代正式版 Latest。即使上游没有新提交，次日仍会构建；同一天、同一提交已经发布时跳过。
-- Nightly 与正式版执行相同的构建、包审计、模拟网关测试和 SHA256 校验。Nightly 属于开发快照，可能包含尚未正式发布的变更。
-- 使用标准 Windows 2022 runner 和固定 Node 22.23.2。Node/npm 会按上游 engines 校验。
-- sparse checkout 展开 `apps/desktop`、`apps/shared`、上游共用构建脚本 `scripts/build`、`pm` 和根目录文件；保留 Git 元数据用于 stamp。
-- 构建、包审计和真实 Electron 模拟网关测试全部通过后，发布 ZIP、SHA256 和 BUILD-INFO。
-- 构建 job 只有仓库读取权限；发布 job 单独获得写权限。不需要 PAT 或 Remote Gateway secrets。
-- 自动版本选择不保证未来上游构建兼容；失败时不会发布可见 Release。若发布上传途中失败留下 draft，请检查并删除失败 draft 后重试。
-- GitHub 公开仓库的标准托管 runner 计算免费；定时任务可能延迟，公开仓库 60 天无活动时 schedule 会停用。Artifacts 保留 7 天，正式下载使用 Releases。
-
-Action 依赖固定到提交 SHA。可以在 Actions 查看每次构建日志和确切上游版本。这里的自动化不是客户端后台自更新；用户自行下载替换。
+`build.ps1` 将上述步骤串起来，并检查产物的 `payload: light`、提交 SHA、干净源码标记、EXE 和 ASAR，以及没有 bundled Agent payload。随后添加许可证和构建信息，生成 ZIP 和 SHA256。
 
 ## 本地构建
 
-Windows x64、Git、符合上游要求的 Node/npm 和网络连接：
+需要 Windows x64、PowerShell 7、Git，以及符合上游 `engines` 的 Node/npm。CI 使用 Node 22 的最新补丁版本；依赖安装启用 `--engine-strict`。
 
 ```powershell
-.\build.ps1 -Version v2026.9.11
-.\package.ps1
+# 最新正式 release，也可以指定 -Version vX.Y.Z
+.\build.ps1
 
-# 构建上游 main 当前 HEAD（自动固定 SHA 并生成 nightly 版本号）
+# 上游 main；可用 -UpstreamCommit 指定完整 SHA
 .\build.ps1 -Version main
-.\package.ps1
 ```
 
-省略 Version 选择最新正式 release。输出位于 `dist`；脚本拒绝覆盖同名 ZIP，请先归档旧文件。
-支持将官方便携 Git 和 Node 放在 `tools/git`、`tools/node`，脚本自动优先使用，或者传 `-NodeDirectory`。便携工具及缓存不提交仓库、不进入客户端 ZIP。没有这些目录时使用 PATH 中的工具。
+输出位于 `dist`：`Hermes-Light-<上游tag或nightly日期与SHA>-win-x64.zip`、对应 `.sha256` 和 `BUILD-INFO.json`。每次使用新的 `.build/<id>` 检出目录，不复用旧产物，也不覆盖同名 ZIP。完成后可以自行删除 `.build` 以回收磁盘空间。
 
-`deploy.ps1 -ZipPath <zip>` 默认部署到 `C:\Apps\HermesThin`，以普通目录移动保留旧版；`-Rollback` 回滚。它拒绝覆盖非托管的非空目录，不删除用户配置。`-ForceClose` 仅在需要强制关闭该部署路径的客户端时使用。
+## 自动构建和发布
 
-## 验证范围和已知问题
+Actions → **Build Windows Light** → **Run workflow**：Version 留空选择最新正式 release，填写正式 tag 构建指定版本，填写 `main` 构建 Nightly。
 
-CI 对 ZIP 中的 Windows EXE 进行隔离首次启动、模拟 HTTP/WebSocket 连接、保存连接后重启以及配置保留检查，并审计禁止的本地 runtime 文件。GitHub runner 自带多种开发工具，因此这不等同于干净 Windows VM 验收；真实私有网关的登录/聊天也不在 CI 中测试。
+- 北京时间每天 11:23 检查最新正式版。
+- 北京时间每天 00:00 构建 main 的 Nightly，日期使用北京时间。
+- 构建前固定上游提交；已有同名 Release 时跳过。正式版 Release tag 为 `light-<上游tag>`，Nightly 为 `light-nightly-YYYYMMDD-<12位SHA>`，避免与历史 Thin Client 混淆。
+- Nightly 以预发布形式发布，不替代正式版 Latest。
+- 构建 job 只有读取权限；发布 job 校验 SHA256 后创建 draft、上传附件并公开。失败时可能留下 draft，需处理后重试。
 
-首次登录超过约 45 秒可能触发上游的 94% 卡住问题：连接保存后彻底退出并重启。未为此修改上游源码。未来上游修复后应重新验证。
+两种版本共用同一流程。Actions 固定到提交 SHA。上游自身构建失败时，本项目也会失败，不增加针对某次上游变动的兼容补丁。
 
-自行构建 EXE 没有 Nous 的签名，可能显示 Unknown Publisher。请核对下载来源和 SHA256。
+向 `main` 推送构建脚本或工作流变更时，也会自动构建最新正式版；已有同名 Release 时仍跳过。
 
-本项目不是 Nous Research 官方发行版。上游许可证随客户端以 `LICENSE.hermes.txt` 分发；Electron 自带许可证文件保留。构建脚本不会携带任何真实连接地址、用户数据或凭据。
+## 使用和验证范围
 
-Release 列表标题使用简短格式：正式版为 Agent 版本（如 `v0.21.5`），每日版为北京时间日期（如 `nightly-260923`）。底层 Release tag 保留原有格式。
-`build.ps1` 会在已知的引导页面引用 `lucide-react`、但 Desktop 未声明依赖时，按上游锁文件的精确版本补装。补装不保存到源码或锁文件，不执行安装脚本，并记录在 BUILD-INFO 中；上游补齐声明后自动跳过。
+从 Releases 下载 ZIP 和 SHA256，完整解压到可写目录，运行 `BUILD-INFO.json` 中记录的 EXE。客户端身份、配置路径、连接界面和运行行为都使用上游 Light 的实现。Windows Light 使用外部更新机制：退出客户端后下载并替换整个程序目录。
+
+旧 Thin Client 的 `%APPDATA%\HermesThin` 自定义配置路径及启动脚本不再使用；新版本按上游默认路径管理配置，需要重新配置连接。
+
+CI 检查构建成功、Light 标记、提交一致性和 ZIP 完整性，不测试真实网关登录/聊天，也不宣称所有 Local 入口均已被上游屏蔽。Electron、原生依赖和其他随包文件由上游打包规则决定。未签名的自行构建 EXE 可能显示 Unknown Publisher。
