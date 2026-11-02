@@ -18,7 +18,9 @@ npm run pack --workspace apps/desktop
 
 ## 本地构建
 
-需要 Windows x64、PowerShell 7、Git，以及符合上游 `engines` 的 Node/npm。CI 使用 Node 22 的最新补丁版本；依赖安装启用 `--engine-strict`。
+需要 Windows x64、PowerShell 7、Git。先安装所选上游提交的 `pm/lock.json` 中 `packages.node.version` 和 `packages.npm.version` 指定的精确版本；`build.ps1` 会在安装依赖前核对实际 Node/npm，版本不符立即停止。依赖安装继续使用 `npm ci --engine-strict`。
+
+CI 先解析正式 tag 或 main 的完整 SHA，再通过该 SHA 读取工具链锁，安装精确 Node 和 npm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
 
 ```powershell
 # 最新正式 release，也可以指定 -Version vX.Y.Z
@@ -28,14 +30,15 @@ npm run pack --workspace apps/desktop
 .\build.ps1 -Version main
 ```
 
-输出位于 `dist`：`Hermes-Light-<上游tag或nightly日期与SHA>-win-x64.zip`、对应 `.sha256` 和 `BUILD-INFO.json`。每次使用新的 `.build/<id>` 检出目录，不复用旧产物，也不覆盖同名 ZIP。完成后可以自行删除 `.build` 以回收磁盘空间。
+输出位于 `dist`：`Hermes-Light-<上游tag或nightly日期与SHA>-win-x64.zip`、对应 `.sha256` 和 `BUILD-INFO.json`。构建信息记录完整上游 SHA、实际 Node/npm 版本和工具链锁的 SHA256。每次使用新的 `.build/<id>` 检出目录，不复用旧产物，也不覆盖同名 ZIP。完成后可以自行删除 `.build` 以回收磁盘空间。
 
 ## 自动构建和发布
 
-Actions → **Build Windows Light** → **Run workflow**：Version 留空选择最新正式 release，填写正式 tag 构建指定版本，填写 `main` 构建 Nightly。
+Actions → **Build Windows Light** → **Run workflow**：Version 留空选择最新正式 release，填写正式 tag 构建指定版本，填写 `main` 构建 Nightly。`validate_only` 默认勾选：完整构建并上传 Actions artifact，跳过已有 Release 检查，绝不创建或修改 Release。只有在 main 分支运行并取消勾选时才允许发布。
 
 - 北京时间每天 11:23 检查最新正式版。
 - 北京时间每天 00:00 构建 main 的 Nightly，日期使用北京时间。
+- PR 自动验证上游 main 的 Windows Nightly，只上传 Actions artifact，不发布 Release。验证与发布使用同一个构建脚本和产物检查。
 - 构建前固定上游提交；已有同名 Release 时跳过。正式版 Release tag 为 `light-<上游tag>`，Nightly 为 `light-nightly-YYYYMMDD-<12位SHA>`，避免与历史 Thin Client 混淆。
 - Nightly 以预发布形式发布，不替代正式版 Latest。
 - 构建 job 只有读取权限；发布 job 校验 SHA256 后创建 draft、上传附件并公开。失败时可能留下 draft，需处理后重试。
@@ -51,3 +54,9 @@ Actions → **Build Windows Light** → **Run workflow**：Version 留空选择�
 旧 Thin Client 的 `%APPDATA%\HermesThin` 自定义配置路径及启动脚本不再使用；新版本按上游默认路径管理配置，需要重新配置连接。
 
 CI 检查构建成功、Light 标记、提交一致性和 ZIP 完整性，不测试真实网关登录/聊天，也不宣称所有 Local 入口均已被上游屏蔽。Electron、原生依赖和其他随包文件由上游打包规则决定。未签名的自行构建 EXE 可能显示 Unknown Publisher。
+
+## 工具链验证与旧版本
+
+运行 `pwsh -File tests/toolchain.Tests.ps1` 检查锁文件解析、格式变化拒绝、不同版本 pin、锁摘要以及实际 Node/npm 不匹配的处理。Windows CI 也会执行这些检查。构建摘要会记录精确上游 SHA、Node/npm 和通过的产物检查。
+
+旧正式版只有在自身提交包含受支持的 `pm/lock.json` 时才能构建；缺锁的历史版本会明确失败，不继承新版本的工具链。即使锁可读取，上游构建入口、依赖或产物布局发生变化仍可能需要维护。本项目不会修改上游源码、补装依赖或关闭 engine-strict 来绕过这些问题。

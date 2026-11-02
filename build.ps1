@@ -2,6 +2,7 @@
 param([string]$Version, [string]$UpstreamCommit, [string]$NightlyDate)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'scripts/toolchain.ps1')
 
 function Run([string]$Exe, [string[]]$Arguments) {
     & $Exe @Arguments
@@ -20,11 +21,18 @@ $src = Join-Path $PSScriptRoot ".build/$([guid]::NewGuid().ToString('N'))"
 Run 'git' @('init', $src)
 Run 'git' @('-C', $src, 'remote', 'add', 'origin', 'https://github.com/NousResearch/hermes-agent.git')
 $ref = if ($Version -eq 'main') { 'refs/heads/main' } else { "refs/tags/$Version" }
-$fetchRef = if ($Version -eq 'main' -and $UpstreamCommit) { $UpstreamCommit } else { $ref }
+$fetchRef = if ($UpstreamCommit) { $UpstreamCommit } else { $ref }
 Run 'git' @('-C', $src, 'fetch', '--depth=1', 'origin', $fetchRef)
 Run 'git' @('-C', $src, 'checkout', '--detach', 'FETCH_HEAD')
 $commit = (& git -C $src rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or ($UpstreamCommit -and $commit -ne $UpstreamCommit)) { throw 'Checkout does not match the selected commit.' }
+$toolchain = Get-UpstreamToolchain (Join-Path $src 'pm/lock.json')
+$nodeVersion = (& node --version).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read Node version.' }
+$npmVersion = (& npm.cmd --version).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read npm version.' }
+Assert-UpstreamToolchain $toolchain $nodeVersion $npmVersion
+Write-Host "Upstream: $Version @ $commit; Node $nodeVersion; npm $npmVersion; pm/lock.json SHA256 $($toolchain.lockSha256)"
 if ($Version -eq 'main') {
     if (-not $NightlyDate) { $NightlyDate = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd') }
     if ($NightlyDate -notmatch '^[0-9]{8}$') { throw 'NightlyDate must use yyyyMMdd.' }
@@ -61,7 +69,8 @@ try {
     $info = [ordered]@{
         upstream = 'NousResearch/hermes-agent'; ref = $Version; commit = $commit
         variant = 'light'; target = 'win-x64'; executable = $exes[0].Name
-        builtAt = [DateTime]::UtcNow.ToString('o'); node = (& node --version).Trim()
+        builtAt = [DateTime]::UtcNow.ToString('o'); node = $nodeVersion; npm = $npmVersion
+        toolchainLock = 'pm/lock.json'; toolchainLockSha256 = $toolchain.lockSha256
         command = 'HERMES_DESKTOP_VARIANT=light npm run pack --workspace apps/desktop'
     } | ConvertTo-Json
     $info | Set-Content (Join-Path $out 'BUILD-INFO.json') -Encoding UTF8
@@ -72,6 +81,9 @@ try {
     [IO.File]::WriteAllText("$zip.sha256", "$hash  $([IO.Path]::GetFileName($zip))`n")
     $info | Set-Content (Join-Path $dist 'BUILD-INFO.json') -Encoding UTF8
     Write-Host "Package: $zip`nSHA256: $hash"
+    if ($env:GITHUB_STEP_SUMMARY) {
+        "Light artifact checks passed: clean selected commit, payload=light, EXE + ASAR, no bundled Agent. Upstream $commit; Node $nodeVersion; npm $npmVersion; ZIP SHA256 $hash" >> $env:GITHUB_STEP_SUMMARY
+    }
 } finally {
     Pop-Location
     foreach ($key in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process') }
