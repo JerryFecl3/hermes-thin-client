@@ -5,6 +5,14 @@ on:
     branches: [main]
     paths:
       - build.ps1
+      - scripts/**
+      - tests/**
+      - .github/workflows/build.yml
+  pull_request:
+    paths:
+      - build.ps1
+      - scripts/**
+      - tests/**
       - .github/workflows/build.yml
   workflow_dispatch:
     inputs:
@@ -12,6 +20,10 @@ on:
         description: 'Upstream stable tag; blank = latest release, main = nightly'
         type: string
         required: false
+      validate_only:
+        description: 'Build and check artifacts without publishing a Release'
+        type: boolean
+        default: true
   schedule:
     - cron: '23 3 * * *' # 11:23 Asia/Shanghai: latest stable
     - cron: '0 16 * * *' # 00:00 Asia/Shanghai: nightly
@@ -20,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-light
+  group: windows-light-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,10 +54,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_VERSION: ${{ inputs.version }}
           SCHEDULE: ${{ github.event.schedule }}
+          VALIDATE_ONLY: ${{ github.event_name == 'pull_request' || inputs.validate_only || github.ref != 'refs/heads/main' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:REQUESTED_VERSION
-          if ($env:SCHEDULE -eq '0 16 * * *') { $version = 'main' }
+          if ($env:SCHEDULE -eq '0 16 * * *' -or $env:GITHUB_EVENT_NAME -eq 'pull_request') { $version = 'main' }
           $date = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd')
           $nightly = $version -eq 'main'
           if ($nightly) {
@@ -65,12 +78,14 @@ jobs:
             $tag = "light-$version"
           }
           $needed = 'true'
-          try {
-            $existing = Invoke-RestMethod "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
-            if ($existing.draft) { throw 'An unfinished draft exists. Review it before retrying.' }
-            $needed = 'false'
-          } catch {
-            if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
+          if ($env:VALIDATE_ONLY -ne 'true') {
+            try {
+              $existing = Invoke-RestMethod "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
+              if ($existing.draft) { throw 'An unfinished draft exists. Review it before retrying.' }
+              $needed = 'false'
+            } catch {
+              if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
+            }
           }
           "version=$version", "commit=$commit", "date=$(if ($nightly) { $date })", "tag=$tag", "nightly=$($nightly.ToString().ToLowerInvariant())", "needed=$needed" >> $env:GITHUB_OUTPUT
           "Upstream: $version @ $commit; release: $tag; build needed: $needed" >> $env:GITHUB_STEP_SUMMARY
@@ -84,10 +99,34 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Test toolchain contract
+        shell: pwsh
+        run: ./tests/toolchain.Tests.ps1
+      - name: Read toolchain from the selected upstream SHA
+        id: toolchain
+        shell: pwsh
+        env:
+          UPSTREAM_COMMIT: ${{ needs.select.outputs.commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./scripts/toolchain.ps1
+          if ($env:UPSTREAM_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full upstream SHA.' }
+          $lockPath = Join-Path $env:RUNNER_TEMP 'upstream-pm-lock.json'
+          Invoke-WebRequest "https://raw.githubusercontent.com/NousResearch/hermes-agent/$env:UPSTREAM_COMMIT/pm/lock.json" -OutFile $lockPath
+          $pins = Get-UpstreamToolchain $lockPath
+          "node=$($pins.node)", "npm=$($pins.npm)" >> $env:GITHUB_OUTPUT
+          "Selected upstream $env:UPSTREAM_COMMIT; Node $($pins.node); npm $($pins.npm); lock SHA256 $($pins.lockSha256)" >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22'
+          node-version: ${{ steps.toolchain.outputs.node }}
           package-manager-cache: false
+      - name: Install exact upstream npm
+        shell: pwsh
+        env:
+          NPM_VERSION: ${{ steps.toolchain.outputs.npm }}
+        run: |
+          npm.cmd install --global "npm@$env:NPM_VERSION" --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked npm.' }
       - name: Build and package upstream Light
         shell: pwsh
         env:
@@ -95,6 +134,18 @@ jobs:
           UPSTREAM_COMMIT: ${{ needs.select.outputs.commit }}
           NIGHTLY_DATE: ${{ needs.select.outputs.date }}
         run: ./build.ps1 -Version $env:UPSTREAM_VERSION -UpstreamCommit $env:UPSTREAM_COMMIT -NightlyDate $env:NIGHTLY_DATE
+      - name: Verify packaged checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checksums = @(Get-ChildItem dist/*.sha256)
+          if ($checksums.Count -ne 1) { throw 'Expected one ZIP checksum.' }
+          $line = (Get-Content -LiteralPath $checksums[0].FullName -Raw).Trim()
+          if ($line -cnotmatch '^([0-9a-f]{64})  ([^/\\]+\.zip)$') { throw 'Invalid checksum manifest.' }
+          $expected = $Matches[1]
+          $zipPath = Join-Path 'dist' $Matches[2]
+          if ((Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'ZIP checksum mismatch.' }
+          "Packaged ZIP checksum verified: $expected" >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: windows-light
@@ -104,6 +155,7 @@ jobs:
           retention-days: 7
 
   publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !inputs.validate_only
     needs: [select, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
