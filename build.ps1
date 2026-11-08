@@ -31,8 +31,13 @@ $nodeVersion = (& node --version).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read Node version.' }
 $npmVersion = (& npm.cmd --version).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read npm version.' }
-Assert-UpstreamToolchain $toolchain $nodeVersion $npmVersion
-Write-Host "Upstream: $Version @ $commit; Node $nodeVersion; npm $npmVersion; pm/lock.json SHA256 $($toolchain.lockSha256)"
+$pnpmVersion = $null
+if ($toolchain.pnpm) {
+    $pnpmVersion = (& pnpm.cmd --version).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot read pnpm version.' }
+}
+Assert-UpstreamToolchain $toolchain $nodeVersion $npmVersion $pnpmVersion
+Write-Host "Upstream: $Version @ $commit; Node $nodeVersion; npm $npmVersion; pnpm $pnpmVersion; pm/lock.json SHA256 $($toolchain.lockSha256)"
 if ($Version -eq 'main') {
     if (-not $NightlyDate) { $NightlyDate = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd') }
     if ($NightlyDate -notmatch '^[0-9]{8}$') { throw 'NightlyDate must use yyyyMMdd.' }
@@ -55,8 +60,15 @@ try {
     $env:HERMES_PAYLOAD_TAG = $null
     $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
     $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
-    Run 'npm.cmd' @('ci', '--workspace', 'apps/desktop', '--workspace', 'apps/shared', '--include-workspace-root', '--engine-strict', '--no-audit', '--no-fund')
-    Run 'npm.cmd' @('run', 'pack', '--workspace', 'apps/desktop')
+    if ($toolchain.pnpm) {
+        Run 'pnpm.cmd' @('install', '--frozen-lockfile')
+        Run 'pnpm.cmd' @('--dir', 'apps/desktop', 'run', 'pack')
+        $buildCommand = 'HERMES_DESKTOP_VARIANT=light pnpm --dir apps/desktop run pack'
+    } else {
+        Run 'npm.cmd' @('ci', '--workspace', 'apps/desktop', '--workspace', 'apps/shared', '--include-workspace-root', '--engine-strict', '--no-audit', '--no-fund')
+        Run 'npm.cmd' @('run', 'pack', '--workspace', 'apps/desktop')
+        $buildCommand = 'HERMES_DESKTOP_VARIANT=light npm run pack --workspace apps/desktop'
+    }
 
     $out = Join-Path $src 'apps/desktop/release/win-unpacked'
     $stamp = Get-Content (Join-Path $out 'resources/install-stamp.json') -Raw | ConvertFrom-Json
@@ -69,9 +81,9 @@ try {
     $info = [ordered]@{
         upstream = 'NousResearch/hermes-agent'; ref = $Version; commit = $commit
         variant = 'light'; target = 'win-x64'; executable = $exes[0].Name
-        builtAt = [DateTime]::UtcNow.ToString('o'); node = $nodeVersion; npm = $npmVersion
+        builtAt = [DateTime]::UtcNow.ToString('o'); node = $nodeVersion; npm = $npmVersion; pnpm = $pnpmVersion
         toolchainLock = 'pm/lock.json'; toolchainLockSha256 = $toolchain.lockSha256
-        command = 'HERMES_DESKTOP_VARIANT=light npm run pack --workspace apps/desktop'
+        command = $buildCommand
     } | ConvertTo-Json
     $info | Set-Content (Join-Path $out 'BUILD-INFO.json') -Encoding UTF8
     Copy-Item -LiteralPath (Join-Path $src 'LICENSE') -Destination (Join-Path $out 'LICENSE.hermes.txt')
@@ -82,7 +94,7 @@ try {
     $info | Set-Content (Join-Path $dist 'BUILD-INFO.json') -Encoding UTF8
     Write-Host "Package: $zip`nSHA256: $hash"
     if ($env:GITHUB_STEP_SUMMARY) {
-        "Light artifact checks passed: clean selected commit, payload=light, EXE + ASAR, no bundled Agent. Upstream $commit; Node $nodeVersion; npm $npmVersion; ZIP SHA256 $hash" >> $env:GITHUB_STEP_SUMMARY
+        "Light artifact checks passed: clean selected commit, payload=light, EXE + ASAR, no bundled Agent. Upstream $commit; Node $nodeVersion; npm $npmVersion; pnpm $pnpmVersion; ZIP SHA256 $hash" >> $env:GITHUB_STEP_SUMMARY
     }
 } finally {
     Pop-Location
