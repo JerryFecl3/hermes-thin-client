@@ -114,8 +114,8 @@ jobs:
           $lockPath = Join-Path $env:RUNNER_TEMP 'upstream-pm-lock.json'
           Invoke-WebRequest "https://raw.githubusercontent.com/NousResearch/hermes-agent/$env:UPSTREAM_COMMIT/pm/lock.json" -OutFile $lockPath
           $pins = Get-UpstreamToolchain $lockPath
-          "node=$($pins.node)", "npm=$($pins.npm)" >> $env:GITHUB_OUTPUT
-          "Selected upstream $env:UPSTREAM_COMMIT; Node $($pins.node); npm $($pins.npm); lock SHA256 $($pins.lockSha256)" >> $env:GITHUB_STEP_SUMMARY
+          "node=$($pins.node)", "npm=$($pins.npm)", "pnpm=$($pins.pnpm)" >> $env:GITHUB_OUTPUT
+          "Selected upstream $env:UPSTREAM_COMMIT; Node $($pins.node); npm $($pins.npm); pnpm $($pins.pnpm); lock SHA256 $($pins.lockSha256)" >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ steps.toolchain.outputs.node }}
@@ -127,6 +127,14 @@ jobs:
         run: |
           npm.cmd install --global "npm@$env:NPM_VERSION" --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked npm.' }
+      - name: Install exact upstream pnpm when pinned
+        if: steps.toolchain.outputs.pnpm != ''
+        shell: pwsh
+        env:
+          PNPM_VERSION: ${{ steps.toolchain.outputs.pnpm }}
+        run: |
+          npm.cmd install --global "pnpm@$env:PNPM_VERSION" --allow-scripts=pnpm --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked pnpm.' }
       - name: Build and package upstream Light
         shell: pwsh
         env:

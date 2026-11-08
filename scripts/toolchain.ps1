@@ -1,4 +1,4 @@
-# Read only the Node/npm pins needed by the Light wrapper. Never infer a version
+# Read only the build-tool pins needed by the Light wrapper. Never infer a version
 # from engines ranges or silently fall back when upstream changes this contract.
 function Get-UpstreamToolchain([string]$LockPath) {
     if (-not (Test-Path -LiteralPath $LockPath -PathType Leaf)) {
@@ -9,7 +9,9 @@ function Get-UpstreamToolchain([string]$LockPath) {
         throw 'Unsupported upstream pm/lock.json schema; review the upstream toolchain contract.'
     }
     $pins = @{}
-    foreach ($name in @('node', 'npm')) {
+    $names = @('node', 'npm')
+    if ($lock.packages.Contains('pnpm')) { $names += 'pnpm' }
+    foreach ($name in $names) {
         $package = $lock.packages[$name]
         if ($package -isnot [System.Collections.IDictionary] -or
             $package.version -isnot [string] -or
@@ -21,12 +23,16 @@ function Get-UpstreamToolchain([string]$LockPath) {
     [pscustomobject]@{
         node = $pins.node
         npm = $pins.npm
+        pnpm = $pins['pnpm']
         lockSha256 = (Get-FileHash -LiteralPath $LockPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 }
 
-function Assert-UpstreamToolchain($Toolchain, [string]$NodeVersion, [string]$NpmVersion) {
+function Assert-UpstreamToolchain($Toolchain, [string]$NodeVersion, [string]$NpmVersion, [string]$PnpmVersion) {
     if ($NodeVersion -cne "v$($Toolchain.node)" -or $NpmVersion -cne $Toolchain.npm) {
         throw "Toolchain mismatch: upstream requires Node $($Toolchain.node), npm $($Toolchain.npm); found $NodeVersion, $NpmVersion. Install the exact pm/lock.json pins before building."
+    }
+    if ($Toolchain.pnpm -and $PnpmVersion -cne $Toolchain.pnpm) {
+        throw "Toolchain mismatch: upstream requires pnpm $($Toolchain.pnpm); found '$PnpmVersion'. Install the exact pm/lock.json pin before building."
     }
 }

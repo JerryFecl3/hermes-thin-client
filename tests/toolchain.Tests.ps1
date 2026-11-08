@@ -37,6 +37,20 @@ try {
         Expect-Failure { Assert-UpstreamToolchain $pins 'v0.0.0' $pair[1] }; $count++
         Expect-Failure { Assert-UpstreamToolchain $pins "v$($pair[0])" '0.0.0' }; $count++
     }
+    # pnpm is optional for older npm revisions, but a present pin must be valid
+    # and installed exactly. Never fall back to npm for a broken pnpm contract.
+    foreach ($invalidPnpm in @($null, '12.15.0', @{}, @{version='^12.15.0'}, @{version="12.15.0`nx=bad"})) {
+        @{schema=1;packages=@{node=@{version='26.12.1'};npm=@{version='12.0.2'};pnpm=$invalidPnpm}} |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $path
+        Expect-Failure { Get-UpstreamToolchain $path }; $count++
+    }
+    @{schema=1;packages=@{node=@{version='26.12.1'};npm=@{version='12.0.2'};pnpm=@{version='12.15.0'}}} |
+        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $path
+    $pins = Get-UpstreamToolchain $path
+    if ($pins.pnpm -cne '12.15.0') { throw 'pnpm pin changed unexpectedly.' }
+    Assert-UpstreamToolchain $pins 'v26.12.1' '12.0.2' '12.15.0'; $count++
+    Expect-Failure { Assert-UpstreamToolchain $pins 'v26.12.1' '12.0.2' }; $count++
+    Expect-Failure { Assert-UpstreamToolchain $pins 'v26.12.1' '12.0.2' '12.14.0' }; $count++
     Write-Host "Passed $count toolchain contract checks."
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force

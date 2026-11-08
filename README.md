@@ -8,8 +8,8 @@
 
 ```powershell
 $env:HERMES_DESKTOP_VARIANT = 'light'
-npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund
-npm run pack --workspace apps/desktop
+pnpm install --frozen-lockfile
+pnpm --dir apps/desktop run pack
 ```
 
 安装和打包规则由上游维护。这里不补装缺失依赖、不裁剪产物、不重命名 EXE，也不调用上游 Electron 内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
@@ -18,9 +18,11 @@ npm run pack --workspace apps/desktop
 
 ## 本地构建
 
-需要 Windows x64、PowerShell 7、Git。先安装所选上游提交的 `pm/lock.json` 中 `packages.node.version` 和 `packages.npm.version` 指定的精确版本；`build.ps1` 会在安装依赖前核对实际 Node/npm，版本不符立即停止。依赖安装继续使用 `npm ci --engine-strict`。
+需要 Windows x64、PowerShell 7、Git。先安装所选上游提交的 `pm/lock.json` 中 `packages.node.version`、`packages.npm.version`，以及存在时的 `packages.pnpm.version` 指定的精确版本；`build.ps1` 会在安装依赖前核对实际版本，不符立即停止。
 
-CI 先解析正式 tag 或 main 的完整 SHA，再通过该 SHA 读取工具链锁，安装精确 Node 和 npm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
+上游锁中包含 pnpm 时，使用上述官方 pnpm 命令，安装范围和 engine 检查由上游配置决定。旧提交没有 pnpm pin 时，继续执行 `npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund` 和 `npm run pack --workspace apps/desktop`。pnpm pin 格式错误或版本不符时不会回退到 npm。
+
+CI 先解析正式 tag 或 main 的完整 SHA，再通过该 SHA 读取工具链锁，安装精确 Node、npm 和需要的 pnpm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
 
 ```powershell
 # 最新正式 release，也可以指定 -Version vX.Y.Z
@@ -30,7 +32,7 @@ CI 先解析正式 tag 或 main 的完整 SHA，再通过该 SHA 读取工具链
 .\build.ps1 -Version main
 ```
 
-输出位于 `dist`：`Hermes-Light-<上游tag或nightly日期与SHA>-win-x64.zip`、对应 `.sha256` 和 `BUILD-INFO.json`。构建信息记录完整上游 SHA、实际 Node/npm 版本和工具链锁的 SHA256。每次使用新的 `.build/<id>` 检出目录，不复用旧产物，也不覆盖同名 ZIP。完成后可以自行删除 `.build` 以回收磁盘空间。
+输出位于 `dist`：`Hermes-Light-<上游tag或nightly日期与SHA>-win-x64.zip`、对应 `.sha256` 和 `BUILD-INFO.json`。构建信息记录完整上游 SHA、实际 Node/npm/pnpm 版本、打包命令和工具链锁的 SHA256。每次使用新的 `.build/<id>` 检出目录，不复用旧产物，也不覆盖同名 ZIP。完成后可以自行删除 `.build` 以回收磁盘空间。
 
 ## 自动构建和发布
 
@@ -57,6 +59,6 @@ CI 检查构建成功、Light 标记、提交一致性和 ZIP 完整性，不测
 
 ## 工具链验证与旧版本
 
-运行 `pwsh -File tests/toolchain.Tests.ps1` 检查锁文件解析、格式变化拒绝、不同版本 pin、锁摘要以及实际 Node/npm 不匹配的处理。Windows CI 也会执行这些检查。构建摘要会记录精确上游 SHA、Node/npm 和通过的产物检查。
+运行 `pwsh -File tests/toolchain.Tests.ps1` 检查锁文件解析、格式变化拒绝、不同版本 pin、锁摘要以及实际 Node/npm/pnpm 不匹配的处理，包含旧 npm 提交与新 pnpm 提交。Windows CI 也会执行这些检查。构建摘要会记录精确上游 SHA、工具版本和通过的产物检查。
 
 旧正式版只有在自身提交包含受支持的 `pm/lock.json` 时才能构建；缺锁的历史版本会明确失败，不继承新版本的工具链。即使锁可读取，上游构建入口、依赖或产物布局发生变化仍可能需要维护。本项目不会修改上游源码、补装依赖或关闭 engine-strict 来绕过这些问题。
