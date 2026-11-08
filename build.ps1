@@ -33,7 +33,7 @@ $npmVersion = (& npm.cmd --version).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot read npm version.' }
 $pnpmVersion = $null
 if ($toolchain.pnpm) {
-    $pnpmVersion = (& pnpm.cmd --version).Trim()
+    $pnpmVersion = (& pnpm.cmd --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read pnpm version.' }
 }
 Assert-UpstreamToolchain $toolchain $nodeVersion $npmVersion $pnpmVersion

@@ -133,7 +133,7 @@ jobs:
         env:
           PNPM_VERSION: ${{ steps.toolchain.outputs.pnpm }}
         run: |
-          npm.cmd install --global "pnpm@$env:PNPM_VERSION" --no-audit --no-fund
+          npm.cmd install --global "pnpm@$env:PNPM_VERSION" --allow-scripts=pnpm --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked pnpm.' }
       - name: Build and package upstream Light
         shell: pwsh
