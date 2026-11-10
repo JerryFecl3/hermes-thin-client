@@ -145,6 +145,12 @@ jobs:
         run: |
           npm.cmd install --global "pnpm@$env:PNPM_VERSION" --allow-scripts=pnpm --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked pnpm.' }
+          # npm exposes a .cmd shim; upstream node-deps requires the native binary.
+          $globalModules = (& npm.cmd root --global | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate global npm packages.' }
+          $pnpmDir = Join-Path $globalModules 'pnpm'
+          if (-not (Test-Path (Join-Path $pnpmDir 'pnpm.exe') -PathType Leaf)) { throw 'The pinned pnpm installation has no native Windows binary.' }
+          $pnpmDir >> $env:GITHUB_PATH
       - name: Build and package upstream Light
         shell: pwsh
         env:

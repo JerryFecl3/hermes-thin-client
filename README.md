@@ -20,6 +20,8 @@ pnpm --dir apps/desktop run pack
 
 需要 Windows x64、PowerShell 7、Git。先安装所选上游提交的 `pm/lock.json` 中 `packages.node.version`、`packages.npm.version`，以及存在时的 `packages.pnpm.version` 指定的精确版本；`build.ps1` 会在安装依赖前核对实际版本，不符立即停止。
 
+现代路径还需要原生 `pnpm.exe` 位于 PATH，只有 npm 的 `pnpm.cmd` shim 不够。通过 npm 全局安装 pnpm 时，将 `Join-Path (npm root --global) 'pnpm'` 指向的包目录加入本次构建进程的 PATH；CI 会完成这一步，并检查原生文件存在。
+
 上游锁中包含 pnpm 时，使用上述上游依赖准备 CLI，安装范围和 engine 检查由上游配置决定。旧提交没有 pnpm pin 时，继续执行 `npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund` 和 `npm run pack --workspace apps/desktop`。pnpm pin 格式错误、版本不符或所选提交缺少 CLI 时明确失败，不会回退到 npm 或自行拼装依赖准备步骤。
 
 CI 先解析正式 tag 或 main 的完整 SHA，再通过带认证的 GitHub Contents API 按该 SHA 读取工具链锁（最多重试 3 次，遵循 HTTP 429 的 Retry-After），安装精确 Node、npm 和需要的 pnpm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
