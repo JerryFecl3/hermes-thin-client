@@ -58,7 +58,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:REQUESTED_VERSION
-          if ($env:SCHEDULE -eq '0 16 * * *' -or $env:GITHUB_EVENT_NAME -eq 'pull_request') { $version = 'main' }
+          if ($env:SCHEDULE -eq '0 16 * * *') { $version = 'main' }
+          # Temporary PR validation of the stable release before simplifying preparation.
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $version = 'v0.23.1' }
           $date = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd')
           $nightly = $version -eq 'main'
           if ($nightly) {
