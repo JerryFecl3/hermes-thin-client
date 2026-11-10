@@ -61,7 +61,8 @@ try {
     $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
     $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
     if ($toolchain.pnpm) {
-        Run 'pnpm.cmd' @('install', '--frozen-lockfile')
+        # Upstream owns the locked workspace install and Electron preparation.
+        Run 'node' @('scripts/build/node-deps.mjs', '--source', $src, '--workspace', 'apps/desktop')
         Run 'pnpm.cmd' @('--dir', 'apps/desktop', 'run', 'pack')
         $buildCommand = 'HERMES_DESKTOP_VARIANT=light pnpm --dir apps/desktop run pack'
     } else {

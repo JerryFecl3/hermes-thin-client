@@ -99,20 +99,28 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Test toolchain contract
+      - name: Test toolchain and build contracts
         shell: pwsh
-        run: ./tests/toolchain.Tests.ps1
+        run: |
+          ./tests/toolchain.Tests.ps1
+          ./tests/build.Tests.ps1
       - name: Read toolchain from the selected upstream SHA
         id: toolchain
         shell: pwsh
         env:
           UPSTREAM_COMMIT: ${{ needs.select.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           . ./scripts/toolchain.ps1
           if ($env:UPSTREAM_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full upstream SHA.' }
           $lockPath = Join-Path $env:RUNNER_TEMP 'upstream-pm-lock.json'
-          Invoke-WebRequest "https://raw.githubusercontent.com/NousResearch/hermes-agent/$env:UPSTREAM_COMMIT/pm/lock.json" -OutFile $lockPath
+          # Authenticated contents API avoids anonymous raw-host throttling.
+          # PowerShell honors Retry-After on 429; retries remain bounded.
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $file = Invoke-RestMethod "https://api.github.com/repos/NousResearch/hermes-agent/contents/pm/lock.json?ref=$env:UPSTREAM_COMMIT" -Headers $headers -MaximumRetryCount 3 -RetryIntervalSec 10
+          if ($file.encoding -ne 'base64' -or -not $file.content) { throw 'Expected base64 content for the selected upstream toolchain lock.' }
+          [IO.File]::WriteAllBytes($lockPath, [Convert]::FromBase64String($file.content))
           $pins = Get-UpstreamToolchain $lockPath
           "node=$($pins.node)", "npm=$($pins.npm)", "pnpm=$($pins.pnpm)" >> $env:GITHUB_OUTPUT
           "Selected upstream $env:UPSTREAM_COMMIT; Node $($pins.node); npm $($pins.npm); pnpm $($pins.pnpm); lock SHA256 $($pins.lockSha256)" >> $env:GITHUB_STEP_SUMMARY
@@ -135,6 +143,12 @@ jobs:
         run: |
           npm.cmd install --global "pnpm@$env:PNPM_VERSION" --allow-scripts=pnpm --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Cannot install locked pnpm.' }
+          # npm exposes a .cmd shim; upstream node-deps requires the native binary.
+          $globalModules = (& npm.cmd root --global | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate global npm packages.' }
+          $pnpmDir = Join-Path $globalModules 'pnpm'
+          if (-not (Test-Path (Join-Path $pnpmDir 'pnpm.exe') -PathType Leaf)) { throw 'The pinned pnpm installation has no native Windows binary.' }
+          $pnpmDir >> $env:GITHUB_PATH
       - name: Build and package upstream Light
         shell: pwsh
         env:
