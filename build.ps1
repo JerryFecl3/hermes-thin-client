@@ -62,6 +62,12 @@ try {
     $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
     if ($toolchain.pnpm) {
         Run 'pnpm.cmd' @('install', '--frozen-lockfile')
+        # Newer upstream revisions separate acquisition from packaging. Invoke
+        # the selected checkout's CLI; it verifies the lock-pinned Electron.
+        $electronPrepare = Join-Path $src 'scripts/build/electron-runtime.mjs'
+        if (Test-Path -LiteralPath $electronPrepare -PathType Leaf) {
+            Run 'node' @($electronPrepare, '--source', $src)
+        }
         Run 'pnpm.cmd' @('--dir', 'apps/desktop', 'run', 'pack')
         $buildCommand = 'HERMES_DESKTOP_VARIANT=light pnpm --dir apps/desktop run pack'
     } else {

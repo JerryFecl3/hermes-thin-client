@@ -9,10 +9,14 @@
 ```powershell
 $env:HERMES_DESKTOP_VARIANT = 'light'
 pnpm install --frozen-lockfile
+# 新版上游将 Electron 准备与打包分开；旧提交没有该 CLI 时跳过
+if (Test-Path scripts/build/electron-runtime.mjs) {
+    node scripts/build/electron-runtime.mjs --source (Get-Location).Path
+}
 pnpm --dir apps/desktop run pack
 ```
 
-安装和打包规则由上游维护。这里不补装缺失依赖、不裁剪产物、不重命名 EXE，也不调用上游 Electron 内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
+安装和打包规则由上游维护。这里不补装缺失依赖、不裁剪产物、不重命名 EXE，通过所选提交提供的 CLI 准备锁定的 Electron，不调用 Electron 包的内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
 
 `build.ps1` 将上述步骤串起来，并检查产物的 `payload: light`、提交 SHA、干净源码标记、EXE 和 ASAR，以及没有 bundled Agent payload。随后添加许可证和构建信息，生成 ZIP 和 SHA256。
 
@@ -22,7 +26,7 @@ pnpm --dir apps/desktop run pack
 
 上游锁中包含 pnpm 时，使用上述官方 pnpm 命令，安装范围和 engine 检查由上游配置决定。旧提交没有 pnpm pin 时，继续执行 `npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund` 和 `npm run pack --workspace apps/desktop`。pnpm pin 格式错误或版本不符时不会回退到 npm。
 
-CI 先解析正式 tag 或 main 的完整 SHA，再通过该 SHA 读取工具链锁，安装精确 Node、npm 和需要的 pnpm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
+CI 先解析正式 tag 或 main 的完整 SHA，再通过带认证的 GitHub Contents API 按该 SHA 读取工具链锁（最多重试 3 次，遵循 HTTP 429 的 Retry-After），安装精确 Node、npm 和需要的 pnpm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
 
 ```powershell
 # 最新正式 release，也可以指定 -Version vX.Y.Z
