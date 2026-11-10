@@ -8,15 +8,11 @@
 
 ```powershell
 $env:HERMES_DESKTOP_VARIANT = 'light'
-pnpm install --frozen-lockfile
-# 新版上游将 Electron 准备与打包分开；旧提交没有该 CLI 时跳过
-if (Test-Path scripts/build/electron-runtime.mjs) {
-    node scripts/build/electron-runtime.mjs --source (Get-Location).Path
-}
+node scripts/build/node-deps.mjs --source (Get-Location).Path --workspace apps/desktop
 pnpm --dir apps/desktop run pack
 ```
 
-安装和打包规则由上游维护。这里不补装缺失依赖、不裁剪产物、不重命名 EXE，通过所选提交提供的 CLI 准备锁定的 Electron，不调用 Electron 包的内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
+安装和打包规则由上游维护。所选提交的 `node-deps.mjs` 负责锁定安装 Desktop 及其工作区依赖、核对 pnpm 并准备 Electron。这里不重复维护安装参数、不补装缺失依赖、不裁剪产物、不重命名 EXE，也不调用 Electron 包的内部 API。使用完整的浅检出，避免维护 sparse checkout 的目录清单。
 
 `build.ps1` 将上述步骤串起来，并检查产物的 `payload: light`、提交 SHA、干净源码标记、EXE 和 ASAR，以及没有 bundled Agent payload。随后添加许可证和构建信息，生成 ZIP 和 SHA256。
 
@@ -24,7 +20,7 @@ pnpm --dir apps/desktop run pack
 
 需要 Windows x64、PowerShell 7、Git。先安装所选上游提交的 `pm/lock.json` 中 `packages.node.version`、`packages.npm.version`，以及存在时的 `packages.pnpm.version` 指定的精确版本；`build.ps1` 会在安装依赖前核对实际版本，不符立即停止。
 
-上游锁中包含 pnpm 时，使用上述官方 pnpm 命令，安装范围和 engine 检查由上游配置决定。旧提交没有 pnpm pin 时，继续执行 `npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund` 和 `npm run pack --workspace apps/desktop`。pnpm pin 格式错误或版本不符时不会回退到 npm。
+上游锁中包含 pnpm 时，使用上述上游依赖准备 CLI，安装范围和 engine 检查由上游配置决定。旧提交没有 pnpm pin 时，继续执行 `npm ci --workspace apps/desktop --workspace apps/shared --include-workspace-root --engine-strict --no-audit --no-fund` 和 `npm run pack --workspace apps/desktop`。pnpm pin 格式错误、版本不符或所选提交缺少 CLI 时明确失败，不会回退到 npm 或自行拼装依赖准备步骤。
 
 CI 先解析正式 tag 或 main 的完整 SHA，再通过带认证的 GitHub Contents API 按该 SHA 读取工具链锁（最多重试 3 次，遵循 HTTP 429 的 Retry-After），安装精确 Node、npm 和需要的 pnpm，最后检出同一 SHA 并重新核对工具链。不会使用浮动 main 的锁构建旧 tag，不读取 `engines` 范围来猜测版本，也不回退到 latest。锁文件缺失、schema 不支持或版本不是精确的三段数字时会失败，需要维护者检查上游变化。
 
@@ -63,6 +59,6 @@ CI 检查构建成功、Light 标记、提交一致性和 ZIP 完整性，不测
 
 ## 工具链验证与旧版本
 
-运行 `pwsh -File tests/toolchain.Tests.ps1` 检查锁文件解析、格式变化拒绝、不同版本 pin、锁摘要以及实际 Node/npm/pnpm 不匹配的处理，包含旧 npm 提交与新 pnpm 提交。Windows CI 也会执行这些检查。构建摘要会记录精确上游 SHA、工具版本和通过的产物检查。
+运行 `pwsh -File tests/toolchain.Tests.ps1` 检查锁文件解析、格式变化拒绝、不同版本 pin、锁摘要以及实际 Node/npm/pnpm 不匹配的处理，包含旧 npm 提交与新 pnpm 提交。`pwsh -File tests/build.Tests.ps1` 用隔离的命令替身检查新旧构建路径、失败停止和关键产物保护，不联网或安装依赖。Windows CI 也会执行这两组检查，并实际构建 Windows 包。构建摘要会记录精确上游 SHA、工具版本和通过的产物检查。
 
 旧正式版只有在自身提交包含受支持的 `pm/lock.json` 时才能构建；缺锁的历史版本会明确失败，不继承新版本的工具链。即使锁可读取，上游构建入口、依赖或产物布局发生变化仍可能需要维护。本项目不会修改上游源码、补装依赖或关闭 engine-strict 来绕过这些问题。

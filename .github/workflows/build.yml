@@ -59,7 +59,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = $env:REQUESTED_VERSION
           if ($env:SCHEDULE -eq '0 16 * * *') { $version = 'main' }
-          # Temporary PR validation of the stable release before simplifying preparation.
+          # Temporary stable-release PR validation; restore main after validation.
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $version = 'v0.23.1' }
           $date = [DateTime]::UtcNow.AddHours(8).ToString('yyyyMMdd')
           $nightly = $version -eq 'main'
@@ -101,9 +101,11 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Test toolchain contract
+      - name: Test toolchain and build contracts
         shell: pwsh
-        run: ./tests/toolchain.Tests.ps1
+        run: |
+          ./tests/toolchain.Tests.ps1
+          ./tests/build.Tests.ps1
       - name: Read toolchain from the selected upstream SHA
         id: toolchain
         shell: pwsh
